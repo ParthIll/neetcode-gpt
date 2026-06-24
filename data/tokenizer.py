@@ -1,19 +1,38 @@
-import numpy as np
-from numpy.typing import NDArray
+from typing import List
 
 
 class Solution:
-    def get_positional_encoding(self, seq_len: int, d_model: int) -> NDArray[np.float64]:
-        # PE(pos, 2i)   = sin(pos / 10000^(2i / d_model))
-        # PE(pos, 2i+1) = cos(pos / 10000^(2i / d_model))
-        #
-        # Hint: Use np.arange() to create position and dimension index vectors,
-        # then compute all values at once with broadcasting (no loops needed).
-        # Assign sine to even columns (PE[:, 0::2]) and cosine to odd columns (PE[:, 1::2]).
-        # Round to 5 decimal places.
-        PE=np.zeros((seq_len,d_model))
-        position = np.arange(seq_len).reshape(-1,1)
-        div_term = 10000**(np.arange(0,d_model,2)/d_model)
-        PE[:,0::2]=np.sin(position/div_term)
-        PE[:,1::2]=np.cos(position/div_term)
-        return np.round(PE,5)
+    def get_merges(self, corpus: str, num_merges: int) -> List[List[str]]:
+        # 1. Split corpus into a list of individual characters
+        # 2. For each merge step:
+        #    a. Count frequency of all adjacent token pairs
+        #    b. Find the most frequent pair (break ties lexicographically)
+        #    c. Merge all non-overlapping occurrences left to right
+        #    d. Record the merge as [token_a, token_b]
+        # 3. Return the list of merges performed
+        corpuslist = list(corpus)
+        retlist=[]
+        for i in range(num_merges):
+            freqMap={}
+            l=0
+            r=1
+            while r<len(corpuslist):
+                freqMap[(corpuslist[l],corpuslist[r])] = freqMap.get((corpuslist[l],corpuslist[r]),0)+1
+                l+=1
+                r+=1
+            freqMap = dict(sorted(freqMap.items(), key=lambda item: item[0],reverse=True))
+            freqMap = dict(sorted(freqMap.items(), key=lambda item: item[1]))
+            print(freqMap)
+            first = list(freqMap.keys())[-1][0]
+            second = list(freqMap.keys())[-1][1]
+            for i in range(len(corpuslist)):
+                try:
+                    if corpuslist[i] ==  first and corpuslist[i+1]==second:
+                        corpuslist[i] = first+second
+                        corpuslist.pop(i+1)
+                except:
+                    break
+            freqMap.clear()
+            retlist.append([first,second])
+        return retlist
+        
