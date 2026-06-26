@@ -1,27 +1,46 @@
 import torch
 import torch.nn as nn
-from torchtyping import TensorType
+from typing import Tuple, Optional
 
-class Solution:
-    def generate(self, model, new_chars: int, context: TensorType[int], context_length: int, int_to_char: dict) -> str:
-        generator = torch.manual_seed(0)
-        initial_state = generator.get_state()
-        result = []
-        for _ in range(new_chars):
-            # Crop context to max length the model can handle
-            if context.shape[1] > context_length:
-                context = context[:, -context_length:]
+class KVCache:
+    def __init__(self):
+        self.cache_k: Optional[torch.Tensor] = None
+        self.cache_v: Optional[torch.Tensor] = None
 
-            # Forward pass -> logits for every position
-            logits = model(context)                          # (1, T, vocab_size)
-            last_logits = logits[:, -1, :]                   # (1, vocab_size)
-            probs = nn.functional.softmax(last_logits, dim=-1)
+    def update(self, new_k: torch.Tensor, new_v: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        if self.cache_k is None:
+            self.cache_k = new_k
+            self.cache_v = new_v
+        else:
+            self.cache_k = torch.cat([self.cache_k, new_k], dim=1)
+            self.cache_v = torch.cat([self.cache_v, new_v], dim=1)
+        return self.cache_k, self.cache_v
 
-            # Sample next token and reset RNG for reproducibility
-            next_token = torch.multinomial(probs, 1, generator=generator)
-            generator.set_state(initial_state)
+    def clear(self):
+        self.cache_k = None
+        self.cache_v = None
 
-            # Append token to context and decode
-            context = torch.cat((context, next_token), dim=-1)
-            result.append(int_to_char[next_token.item()])
-        return ''.join(result)
+class CachedAttention(nn.Module):
+    def __init__(self, model_dim: int):
+        super().__init__()
+        torch.manual_seed(0)
+        self.q_proj = nn.Linear(model_dim, model_dim, bias=False)
+        self.k_proj = nn.Linear(model_dim, model_dim, bias=False)
+        self.v_proj = nn.Linear(model_dim, model_dim, bias=False)
+
+    def forward(self, x: torch.Tensor, kv_cache: Optional[KVCache] = None) -> Tuple[torch.Tensor, KVCache]:
+        q = self.q_proj(x)
+        k = self.k_proj(x)
+        v = self.v_proj(x)
+
+        if kv_cache is None:
+            kv_cache = KVCache()
+
+        full_k, full_v = kv_cache.update(k, v)
+
+        # Scaled dot-product attention
+        scores = (q @ full_k.transpose(-2, -1)) * (full_k.shape[-1] ** -0.5)
+        weights = torch.softmax(scores, dim=-1)
+        output = weights @ full_v
+
+        return torch.round(output, decimals=4), kv_cache
